@@ -1,68 +1,17 @@
 
-def def_HammingDistance(n, m):
-    #from scipy.spatial.distance import hamming
-    hamming_distance = int(hamming(list(n), list(m)) * len(n))
-    #print(hamming_distance)
-    return hamming_distance
-
-def def_EditDistance(x, y):
-    # Create distance matrix
-    D = []
-    for i in range(len(x)+1):
-        D.append([0]*(len(y)+1))
-    # Initialize first row and column of matrix
-    for i in range(len(x)+1):
-        D[i][0] = i
-    for i in range(len(y)+1):
-        D[0][i] = i
-    # Fill in the rest of the matrix
-    for i in range(1, len(x)+1):
-        for j in range(1, len(y)+1):
-            distHor = D[i][j-1] + 1
-            distVer = D[i-1][j] + 1
-            if x[i-1] == y[j-1]:
-                distDiag = D[i-1][j-1]
-            else:
-                distDiag = D[i-1][j-1] + 1
-            D[i][j] = min(distHor, distVer, distDiag)
-    # Edit distance is the value in the bottom right corner of the matrix
-    return D[-1][-1]
-
-def def_making_aligned_pattern(each_aligned_target, each_aligned_GN19):
-    list_aligned_pattern = []
-    for idx in range(0, len(each_aligned_target)):
-        if each_aligned_target[idx] == '-':
-            list_aligned_pattern.append('R')
-        elif each_aligned_GN19[idx] == '-':
-            list_aligned_pattern.append('D')
-        elif ((each_aligned_target[idx] != '-') and (each_aligned_GN19[idx] != '-')):
-            if each_aligned_target[idx] == each_aligned_GN19[idx]:
-                list_aligned_pattern.append('|')
-            elif each_aligned_target[idx] != each_aligned_GN19[idx]:
-                list_aligned_pattern.append('M')
-    aligned_pattern = ''.join(list_aligned_pattern)
-    #print(each_aligned_target)
-    #print(aligned_pattern)
-    #print(each_aligned_GN19)
-    return aligned_pattern
-
-
-
 def align(file):
 
-
-    print(file, 'start')
     df = pd.read_pickle('path')
     ene = df.copy()
     ene = ene.set_index('Target')
     # ene['sgtg'] = ene['sgRNA'] + ene['Target']
     # ene = ene.set_index('sgtg')
     ene = ene.reset_index()
-    print('energy file')
+
 
     dic = {}
     for idx in ene.index:
-        tg = ene.loc[idx, 'Target'].upper() # 'Target'으로
+        tg = ene.loc[idx, 'Target'].upper()
         sg = ene.loc[idx, 'sgRNA'].upper()
         tgsg = tg+sg
 
@@ -75,13 +24,9 @@ def align(file):
         dic[tgsg].append(mfe)
         dic[tgsg].append(mfe1)
 
-    print('energy dic')
 
 
     df = pd.read_pickle('path')
-    # df = pd.read_pickle('path')
-    # print(nnn, file, 'open')
-
     df = df.set_index('Target')
     df = df.reset_index()
 
@@ -89,7 +34,7 @@ def align(file):
     for idx in df.index:
         sg = df.loc[idx, 'sgRNA']
         tg = df.loc[idx, 'WT_Target']
-        sg = tg[:23-int(gn)] +'G'+ sg + tg[-11:] # tg[1] 대신 'G' 해도 된다.
+        sg = tg[:23-int(gn)] +'G'+ sg + tg[-11:] # tg[1] 
         # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
         df.loc[idx, 'sgRNA2'] = sg
 
@@ -140,7 +85,7 @@ def align(file):
             ali.append(gt)
             ali.append(tm)
             # ali.append(dn)
-            ali.append(sgwt) # 추가
+            ali.append(sgwt) 
             # ali.append(dn)
             # ali.append(gh)
             # ali.append(mfe)
@@ -148,8 +93,7 @@ def align(file):
 
             align_lst.append(ali)
 
-    # print(alignments[0])
-    print('finish alignment')
+
 
 
     final = pd.DataFrame(align_lst)
@@ -157,7 +101,7 @@ def align(file):
 
     ff = final.copy()
     final = pd.DataFrame()
-    #%%
+
 
     for idx in ff.index:
         tg = ff.loc[idx, 'Aligned_Target']
@@ -182,9 +126,8 @@ def align(file):
         ff.loc[idx, 'Alignment'] = target
         ff.loc[idx, 'Counting_Align'] = target[24-int(gn):-11] #GN19 : 5, GN18 : 6, GN17 : 7, GN16 : 8
         
-    print('finish counting')
 
-    #%%
+
     aa = ff.copy()
 
     for idx in aa.index:
@@ -196,9 +139,7 @@ def align(file):
         else:
             aa.loc[idx, 'PAM_MUT'] = 1 
 
-    print('PAM mut')
 
-    #%%
 
     for idx in aa.index:
         ali = aa.loc[idx, 'Alignment']
@@ -232,9 +173,7 @@ def align(file):
         aa.loc[idx, 'RB_NUM'] = rb
         aa.loc[idx, 'DB_NUM'] = db
         
-    print('counting')
 
-    #%%
 
     for idx in aa.index:
         tg = aa.loc[idx, 'Target'].upper()
@@ -253,9 +192,7 @@ def align(file):
         else:
             pass
         
-    print('add energy')
 
-    #%%
 
     dd = aa.copy()
 
@@ -278,17 +215,12 @@ def align(file):
 
         dd.loc[idx, 'Matched_SEQ'] = ali_seq
 
-    #%%
-
 
     for idx in dd.index:
         mat = dd.loc[idx, 'Matched_SEQ']
         dr = mt.Tm_NN(mat, nn_table=mt.R_DNA_NN1)
         dd.loc[idx, 'sgRNA_Target_Tm'] = dr
         
-    print('tm calculated')
-
-
 
     aa = dd.copy()
 
@@ -303,5 +235,5 @@ def align(file):
         aa.loc[idx, 'Tm_ProtoSpacer'] = mt.Tm_NN(tg, nn_table=mt.DNA_NN1)
         aa.loc[idx, 'sgRNA'] = sg
         
-    print('tm2')
+
 
