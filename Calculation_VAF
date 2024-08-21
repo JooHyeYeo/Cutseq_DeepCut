@@ -1,0 +1,235 @@
+
+
+def reverse_complement(sSeq):
+    dict_sBases = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N', 'U': 'U', 'n': '',
+                   '.': '.', '*': '*', 'a': 't', 'c': 'g', 'g': 'c', 't': 'a', '>':'>'}
+    list_sSeq = list(sSeq)  # Turns the sequence in to a gigantic list
+    list_sSeq = [dict_sBases[sBase] for sBase in list_sSeq]
+    return ''.join(list_sSeq)[::-1]
+
+
+def read_fastq(file):
+  input_dic = {}
+  with open("{}".format(file), 'r') as f:
+      for i, line in enumerate(f):
+          if i%4 !=1: pass
+          else:
+              x = line.strip()
+              if x in input_dic.keys():
+                  input_dic[x] += 1
+              else:
+                  input_dic[x] = 1
+
+  return input_dic
+
+
+
+def mm_generator (Mismatch_num, FP):
+
+    Barcode_len = len(FP)
+    Barcode_combi = itertools.combinations(range(Barcode_len),Mismatch_num)
+    Dict_of_nucleotide = {'A':0, 'C':0, 'T':0, 'G':0}
+
+    MM_dict = {}
+    MM_dict[FP] = FP
+
+    for combi in Barcode_combi: # combi : (0,2)
+
+        FP_dict = {}
+
+        for i in range(0, len(combi)): #len(combi) : 2
+
+            if i == 0:
+                POS_MM = combi[i] #POS_MM : combi[0] = 0, combi[1] = 2
+        
+                for nt in Dict_of_nucleotide:
+                    if FP[POS_MM] == nt:
+                        pass
+                    else:
+                        FP_MM = FP[:POS_MM] + nt + FP[POS_MM+1:]
+                        FP_dict[FP_MM] = FP
+
+            else:
+                POS_MM = combi[i]
+                FP_dict2 = {}
+                for key in FP_dict:
+                    for nt in Dict_of_nucleotide:
+                        if key[POS_MM] == nt:
+                            pass
+                        else:
+                            FP_MM2 = key[:POS_MM] + nt + key[POS_MM+1:]
+                            FP_dict2[FP_MM2] = FP
+                FP_dict = FP_dict2
+
+        for MM_gen in FP_dict:
+            MM_dict[MM_gen] = FP
+   
+    return MM_dict
+
+
+def linker_search(linker, fastq_dic, len_lk, mm_dic):
+
+    lk_dic ={}
+    for read in fastq_dic:
+      n = 0
+      while n < 100:
+        if read[n:n+len_lk] in mm_dic:
+          tread = read[n:]
+          if tread in lk_dic:
+            # read_cnt = fastq_dic[read]
+            lk_dic[tread] += fastq_dic[read] #+ read_cnt
+          else:
+             lk_dic[tread] = fastq_dic[read]
+          break
+        else: n +=1
+
+    return lk_dic
+
+
+# barcode dictionary
+def barcode_dic(df):
+  bar_dic = {}
+  for idx in df.index:
+    bar = df.loc[idx, 'Barcode']
+    bar = bar.upper()
+    dic = mm_generator(1,bar)
+    for i in dic:
+       bar_dic[i] = bar
+  return bar_dic
+
+
+def wt_search(fastq_dic, len_lk, mm_dic):
+
+    lk_dic ={}
+    for read in fastq_dic:
+      n = 18
+      while n < 300:
+        if read[n:n+len_lk] in mm_dic:
+          tread = read[:n+len_lk+8]
+          if tread in lk_dic:
+             cnt = lk_dic[tread][0]
+             cnt = cnt + fastq_dic[read]
+             lk_dic[tread][0] = cnt
+          else:
+            lk_dic[tread] = []
+            lk_dic[tread].append(fastq_dic[read])
+            lk_dic[tread].append('WT')
+            lk_dic[tread].append(read[n+len_lk:n+len_lk+8])
+
+          break
+        else: n +=1
+
+    return lk_dic
+
+def mut_search(fastq_dic, len_lk, mm_dic):
+
+    lk_dic ={}
+    for read in fastq_dic:
+      n = 18
+      while n < 300:
+        if read[n:n+len_lk] in mm_dic:
+          tread = read[:n+len_lk+8]
+          if tread in lk_dic:
+             cnt = lk_dic[tread][0]
+             cnt = cnt + fastq_dic[read]
+             lk_dic[tread][0] = cnt
+          else:
+            lk_dic[tread] = []
+            lk_dic[tread].append(fastq_dic[read])
+            lk_dic[tread].append('Mut')
+            lk_dic[tread].append(read[n+len_lk:n+len_lk+8])
+
+          break
+        else: n +=1
+
+    return lk_dic
+
+
+def barcode_dic(df):
+  bar_dic = {}
+  for idx in df.index:
+    bar = df.loc[idx, 'Barcode']
+    bar = bar.upper()
+    dic = mm_generator(1,bar)
+    for i in dic:
+       bar_dic[i] = bar
+  return bar_dic
+
+
+
+
+def wt_tar_dic(df): # {'Barcode' : 'Target 30bp', 'Target'}
+
+  bar_dic = {}
+  for idx in df.index:
+    bar = df.loc[idx, 'Barcode']
+
+    tg = df.loc[idx, 'FINAL_WIDE_WT_TARGET'].upper()
+    tg = tg[-100:]
+    bar_dic[bar]=[]
+    bar_dic[bar].append(tg)
+
+  return bar_dic
+
+
+
+
+def mut_tar_dic(df): # {'Barcode' : 'Target'}
+
+  bar_dic = {}
+  for idx in df.index:
+    bar = df.loc[idx, 'Barcode']
+
+    tg = df.loc[idx, 'FINAL_WIDE_MT_TARGET'].upper()
+    tg = tg[-100:]
+    bar_dic[bar]=[]
+    bar_dic[bar].append(tg)
+
+
+  return bar_dic
+
+
+
+def wt_barcode_search(trim_dic, bar_dic, wt_tg_dic):
+  bc_len = len(list(bar_dic.keys())[0])
+  wtdic = {}
+
+  for read in trim_dic:
+    i = 18
+    while i < len(read) - bc_len + 1:
+      if read[i : i+bc_len] in bar_dic:
+        bc = read[i : i+bc_len]
+        bc = bar_dic[bc]
+        tg = wt_tg_dic[bc][0]
+        if read.find(tg) == -1:
+           break
+        else:
+           trim_dic[read].append(bc)
+           wtdic[read] = trim_dic[read]
+           break
+      else:
+        i+=1
+
+  return wtdic
+
+def mut_barcode_search(trim_dic, bar_dic, mut_tg_dic):
+  bc_len = len(list(bar_dic.keys())[0])
+  mutdic = {}
+
+  for read in trim_dic:
+    i = 18
+    while i < len(read) - bc_len + 1:
+      if read[i : i+bc_len] in bar_dic:
+        bc = read[i : i+bc_len]
+        bc = bar_dic[bc]
+        tg = mut_tg_dic[bc][0]
+        if read.find(tg) == -1:
+           break
+        else:
+           trim_dic[read].append(bc)
+           mutdic[read] = trim_dic[read]
+           break
+      else:
+        i+=1
+
+  return mutdic
