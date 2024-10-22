@@ -1,13 +1,17 @@
+import pandas as pd
+from Bio import pairwise2
+from Bio.SeqUtils import MeltingTemp as mt
+from concurrent.futures.process import ProcessPoolExecutor
+import os
 
-def align(file):
 
-    df = pd.read_pickle('path')
+def align_and_feature_for_DeepCut(file_name, gn): 
+    # gn : int, from 16 to 19
+
+    df = pd.read_csv('path1_{}'.format(file_name))  # path1 = 'path of files after calculating gh and mfe'
     ene = df.copy()
     ene = ene.set_index('Target')
-    # ene['sgtg'] = ene['sgRNA'] + ene['Target']
-    # ene = ene.set_index('sgtg')
     ene = ene.reset_index()
-
 
     dic = {}
     for idx in ene.index:
@@ -25,8 +29,8 @@ def align(file):
         dic[tgsg].append(mfe1)
 
 
+    df = pd.read_csv('path2_{}'.format(file_name)) #path2 = 'path of files before calculating gh and mfe'
 
-    df = pd.read_pickle('path')
     df = df.set_index('Target')
     df = df.reset_index()
 
@@ -34,8 +38,7 @@ def align(file):
     for idx in df.index:
         sg = df.loc[idx, 'sgRNA']
         tg = df.loc[idx, 'WT_Target']
-        sg = tg[:23-int(gn)] +'G'+ sg + tg[-11:] # tg[1] 
-        # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
+        sg = tg[:23-int(gn)] +'G'+ sg + tg[-11:]
         df.loc[idx, 'sgRNA2'] = sg
 
 
@@ -50,7 +53,7 @@ def align(file):
         
         pam = target[-11:-8]
         last_tg = target[-8:]
-        sg20 = tg[23-int(gn)] # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
+        sg20 = tg[23-int(gn)]
 
         sgrna = df.loc[idx, 'sgRNA']
         wttg = df.loc[idx, 'WT_Target']
@@ -59,10 +62,6 @@ def align(file):
         tt = df.loc[idx, 'Target_Type']
         gt = df.loc[idx, 'Guide_Type']
         tm = df.loc[idx, 'Target_mutation']
-        # dn = df.loc[idx, 'Cut']
-        # gh = df.loc[idx, 'UnCut']
-        # mfe = df.loc[idx, 'CI']
-        # mfe2 = df.loc[idx, 'MFE_GN19_scaffold']
         sgwt = 'G' + sgrna.upper() + wttg.upper()
 
         list_alignments= []
@@ -76,7 +75,7 @@ def align(file):
             ali.append(last_tg)
             ali.append(sg20)
 
-            ali.append(target) # 추가
+            ali.append(target)
             ali.append(sgrna)
             ali.append(wttg)
             ali.append(wtsg)
@@ -84,156 +83,99 @@ def align(file):
             ali.append(tt)
             ali.append(gt)
             ali.append(tm)
-            # ali.append(dn)
-            ali.append(sgwt) 
-            # ali.append(dn)
-            # ali.append(gh)
-            # ali.append(mfe)
-            # ali.append(format_alignment(*alignments))
-
+            ali.append(sgwt)
             align_lst.append(ali)
 
 
+    df_out = pd.DataFrame(align_lst)
+    df_out.columns = ['Aligned_Target', 'Aligned_sgRNA', 'PAM', 'Target[-9:]', 'Target20','Target', 'sgRNA', 'WT_Target', 'WT_guide', 'Guide_Info', 'Target_Type1', 'Guide_Type', 'Target_mutation', 'sg+WT'] #, 'opti_deltaGH', 'MFE_GN19', 'MFE_GN19_scaffold']
 
-
-    final = pd.DataFrame(align_lst)
-    final.columns = ['Aligned_Target', 'Aligned_sgRNA', 'PAM', 'Target[-9:]', 'Target20','Target', 'sgRNA', 'WT_Target', 'WT_guide', 'Guide_Info', 'Target_Type1', 'Guide_Type', 'Target_mutation', 'sg+WT'] #, 'opti_deltaGH', 'MFE_GN19', 'MFE_GN19_scaffold']
-
-    ff = final.copy()
-    final = pd.DataFrame()
-
-
-    for idx in ff.index:
-        tg = ff.loc[idx, 'Aligned_Target']
-        # tg = tg[4:]
-        sg = ff.loc[idx, 'Aligned_sgRNA']
-        # sg = sg[4:]
-
-        target = ''
-
-        for i in range(0, len(tg)):
-            if tg[i] == sg[i]:
-                target += '|'
-            elif tg[i] == '-' and sg[i] == '-':
-                target += '|'
-            elif tg[i] == '-':
-                target += 'R'
-            elif sg[i] == '-':
-                target += 'D'
-            else:
-                target += 'M'
-
-        ff.loc[idx, 'Alignment'] = target
-        ff.loc[idx, 'Counting_Align'] = target[24-int(gn):-11] #GN19 : 5, GN18 : 6, GN17 : 7, GN16 : 8
+    for idx in df_out.index:
         
-
-
-    aa = ff.copy()
-
-    for idx in aa.index:
-        pam = aa.loc[idx, 'PAM']
-        pam = pam[-2:]
-
-        if pam == 'GG':
-            aa.loc[idx, 'PAM_MUT'] = 0
-        else:
-            aa.loc[idx, 'PAM_MUT'] = 1 
-
-
-
-    for idx in aa.index:
-        ali = aa.loc[idx, 'Alignment']
-        rali = ali[24-int(gn):-11] #GN19 : 5, GN18 : 6, GN17 : 7, GN16 : 8
-        # rali = ali[1:]
-        aa.loc[idx, 'Counting_Alignment'] = rali
-
-
-
-    for idx in aa.index:
-        ali = aa.loc[idx, 'Counting_Alignment']
-        ll = len(ali)
-
-        mm = 0
-        rb = 0
-        db = 0
-
-        for i in range(0,ll):
-            if ali[i] == '|':
-                pass
-            elif ali[i] == 'M':
-                mm += 1
-            elif ali[i] == 'R':
-                rb += 1
-            elif ali[i] == 'D':
-                db += 1
-            else:
-                pass
+        aligned_tg = df_out.loc[idx, 'Aligned_Target']
+        aligned_sg = df_out.loc[idx, 'Aligned_sgRNA']
         
-        aa.loc[idx, 'MM_NUM'] = mm
-        aa.loc[idx, 'RB_NUM'] = rb
-        aa.loc[idx, 'DB_NUM'] = db
-        
-
-
-    for idx in aa.index:
-        tg = aa.loc[idx, 'Target'].upper()
-        sg = aa.loc[idx, 'sgRNA'].upper()
+        pam  = df_out.loc[idx, 'PAM'][-2:]
+        tg   = df_out.loc[idx, 'Target'].upper()
+        sg   = df_out.loc[idx, 'sgRNA'].upper()
         tgsg = tg+sg
+
+        alignment = ''
+        matched_seq = ''
         
-        if tgsg in dic:
+        mm, rb, db = 0, 0, 0
 
-            gh = dic[tgsg][0]
-            mfe = dic[tgsg][1]
-            mfe1 = dic[tgsg][2]
-
-            aa.loc[idx, 'opti_deltaGH'] = gh
-            aa.loc[idx, 'MFE_GN19'] = mfe
-            aa.loc[idx, 'MFE_GN19_scaffold'] = mfe1
-        else:
-            pass
         
-
-
-    dd = aa.copy()
-
-    for idx in dd.index:
-        ali = dd.loc[idx, 'Alignment']
-        ali = ali[23-int(gn):-11] # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
-        
-        sg = dd.loc[idx, 'sgRNA'].upper()
-        
-        tg = dd.loc[idx, 'Aligned_Target'].upper()
-        tg = tg[23-int(gn):-11] # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
-
-        ali_seq = ''
-
-        for i in range(0, len(ali)):
-            if ali[i] == '|':
-                ali_seq += tg[i]
+        for t_char, s_char in zip(aligned_tg, aligned_sg):
+            if t_char == s_char or (t_char == '-' and s_char == '-'):
+                alignment += '|'
+            elif t_char == '-':
+                alignment += 'R'
+            elif s_char == '-':
+                alignment += 'D'
             else:
-                pass
+                alignment += 'M'
 
-        dd.loc[idx, 'Matched_SEQ'] = ali_seq
-
-
-    for idx in dd.index:
-        mat = dd.loc[idx, 'Matched_SEQ']
-        dr = mt.Tm_NN(mat, nn_table=mt.R_DNA_NN1)
-        dd.loc[idx, 'sgRNA_Target_Tm'] = dr
+        cnt_align = alignment[24-gn:-11]
         
-
-    aa = dd.copy()
-
-    for idx in aa.index:
-
-        tg = aa.loc[idx, 'Aligned_Target'].upper()
-        tg = tg[23-int(gn):-11] #%% GN19: 4, GN18:5, GN17:6, GN16:7
-
-        sg = 'G'+ aa.loc[idx, 'sgRNA'].upper()
-
-        aa.loc[idx,'Tm_Spacer'] = mt.Tm_NN(sg, nn_table=mt.RNA_NN1)
-        aa.loc[idx, 'Tm_ProtoSpacer'] = mt.Tm_NN(tg, nn_table=mt.DNA_NN1)
-        aa.loc[idx, 'sgRNA'] = sg
+        for i in range(0, len(cnt_align)):
+            if   cnt_align[i] == '|': pass
+            elif cnt_align[i] == 'M': mm += 1
+            elif cnt_align[i] == 'R': rb += 1
+            elif cnt_align[i] == 'D': db += 1
+            else                    : pass
         
+        ali    = alignment[23-gn:-11]  # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
+        ali_tg = aligned_tg[23-gn:-11] # GN19 : 4, GN18 : 5, GN17 : 6, GN16 : 7
+        
+        for i in range(0, len(ali)):
+            if ali[i] == '|': matched_seq += ali_tg[i]
+            
+        g_sg = 'G'+ df_out.loc[idx, 'sgRNA'].upper()
+        
+        # update values
+        df_out.loc[idx, 'Alignment'] = alignment
+        df_out.loc[idx, 'Counting_Align'] = cnt_align #GN19 : 5, GN18 : 6, GN17 : 7, GN16 : 8
+        
+        if pam == 'GG': df_out.loc[idx, 'PAM_MUT'] = 0
+        else          : df_out.loc[idx, 'PAM_MUT'] = 1 
+        
+        df_out.loc[idx, 'Counting_Alignment'] = cnt_align
+        df_out.loc[idx, 'MM_NUM'] = mm
+        df_out.loc[idx, 'RB_NUM'] = rb
+        df_out.loc[idx, 'DB_NUM'] = db
+        df_out.loc[idx, 'opti_deltaGH'] = dic[tgsg][0]
+        df_out.loc[idx, 'MFE_GN19'] = dic[tgsg][1]
+        df_out.loc[idx, 'MFE_GN19_scaffold'] = dic[tgsg][2]
+        df_out.loc[idx, 'Matched_SEQ'] = matched_seq
+        df_out.loc[idx, 'sgRNA_Target_Tm'] = mt.Tm_NN(matched_seq, nn_table=mt.R_DNA_NN1)
+        df_out.loc[idx, 'Tm_Spacer'] = mt.Tm_NN(g_sg, nn_table=mt.RNA_NN1)
+        df_out.loc[idx, 'Tm_ProtoSpacer'] = mt.Tm_NN(ali_tg, nn_table=mt.DNA_NN1)
+        df_out.loc[idx, 'sgRNA'] = g_sg
 
 
+    df_out['GN'] = 'GN{}'.format(gn)
+    df_out['G20'] = df_out['Target20']
+    
+    df_out = df_out[['Aligned_Target', 'Aligned_sgRNA', 'PAM', 'Target[-9:]', 'Target20',
+       'Target', 'sgRNA', 'WT_Target', 'WT_guide', 'Guide_Info',
+       'Target_Type1', 'Guide_Type', 'Target_mutation', 'sg+WT', 'Alignment',
+       'Counting_Align', 'PAM_MUT', 'Counting_Alignment', 'MM_NUM', 'RB_NUM',
+       'DB_NUM', 'opti_deltaGH', 'MFE_GN19', 'MFE_GN19_scaffold',
+       'Matched_SEQ', 'sgRNA_Target_Tm', 'Tm_Spacer', 'Tm_ProtoSpacer', 'GN',
+       'G20']]
+
+    df_out.to_csv('path for saving files')
+
+
+    
+
+
+# path1 = 'path of files after calculating gh and mfe'
+# path2 = 'path of files before calculating gh and mfe'
+
+gn = '' # 16, 17, 18, or 19
+lst = ['file_name_lst']
+
+with ProcessPoolExecutor(max_workers=10) as executor:
+    futs = [executor.submit(align_and_feature_for_DeepCut, file_name, gn) for file_name in lst]
