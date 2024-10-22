@@ -1,0 +1,383 @@
+import pandas as pd
+from Bio.Seq import Seq
+from scipy.spatial.distance import hamming
+from RNA import fold_compound
+from concurrent.futures.process import ProcessPoolExecutor
+
+
+
+def HammingDistance(n, m):
+    hamming_distance = int(hamming(list(n), list(m)) * len(n))
+    return hamming_distance
+
+def EditDistance(x, y):
+    # Ensure x is the shorter string
+    if len(x) > len(y):
+        x, y = y, x
+    
+    # Initialize the distance array
+    previous_row = list(range(len(y) + 1))
+
+    for i in range(1, len(x) + 1):
+        current_row = [0] * (len(y) + 1)
+        current_row[0] = i  # Distance for the current character in x
+        
+        # Set the initial value of the current_row
+        for j in range(1, len(y) + 1):
+            # If the characters are the same, take the diagonal value
+            if x[i - 1] == y[j - 1]:
+                current_row[j] = previous_row[j - 1]
+            else:
+                # Calculate the minimum distance
+                distHor = previous_row[j] + 1
+                distVer = current_row[j - 1] + 1
+                distDiag = previous_row[j - 1] + 1
+
+                current_row[j] = min(distHor, distVer, distDiag)
+
+        previous_row = current_row  # Move to the next row
+
+    return previous_row[-1]  # The last entry in the current row is the edit distance
+
+
+def alignment_score(modified_alignment):
+    
+    score = 0
+    
+    for i in range(1, len(modified_alignment)):
+        pattern = modified_alignment[i]
+        
+        if pattern == '|' :
+            score += 1
+        elif pattern == 'M' or 'W':
+            score += -1
+        elif pattern == 'D' or 'R' or '-' or 'X':
+            score += - 1.21
+    
+    return score
+
+def modify_aligned_pattern(target, gRNA, target_aligned, gRNA_aligned):
+    def insert_gaps(list_target, list_gRNA, aligned_list, idx, condition_chars):
+        """Helper function to insert gaps ('-') based on condition."""
+        if aligned_list[idx] in condition_chars:
+            list_target.insert(idx, '-')
+            list_gRNA.insert(idx, '-')
+
+    def apply_modifications(target, gRNA, target_aligned, gRNA_aligned, condition_chars):
+        """Helper function to modify alignment lists based on conditions."""
+        list_target = list(target)
+        list_gRNA = list(gRNA)
+        list_target_aligned = list(target_aligned)
+        list_gRNA_aligned = list(gRNA_aligned)
+        list_range = list(range(len(list_gRNA_aligned)))
+
+        # Insert gaps into target and gRNA where the conditions are met
+        for idx in list_range:
+            insert_gaps(list_target, list_gRNA, list_gRNA_aligned, idx, condition_chars)
+
+        return ''.join(list_target), ''.join(list_gRNA), ''.join(list_target_aligned), ''.join(list_gRNA_aligned)
+
+    # Modify the target and gRNA alignment based on 'X' and 'R' conditions
+    target_modified, gRNA_modified, target_aligned_modified, gRNA_aligned_modified = apply_modifications(
+        target, gRNA, target_aligned, gRNA_aligned, condition_chars=['X', 'R']
+    )
+
+    # Modify the gRNA alignment based on 'X' and 'D' conditions
+    gRNA_modified, target_modified, gRNA_aligned_modified, target_aligned_modified = apply_modifications(
+        gRNA_modified, target_modified, gRNA_aligned_modified, target_aligned_modified, condition_chars=['X', 'D']
+    )
+
+    # Compute alignment score
+    aligned_modified_score = alignment_score(target_aligned_modified)
+
+    # Store results in a dictionary
+    dict_alignment = {
+        'target_modified': target_modified,
+        'target_aligned_modified': target_aligned_modified,
+        'gRNA_aligned_modified': gRNA_aligned_modified,
+        'gRNA_modified': gRNA_modified,
+        'aligned_modified_score': aligned_modified_score
+    }
+
+    return dict_alignment
+
+
+
+def delta_GH_CRISPR(gRNA, target):
+    gN19 = 'G' + gRNA
+    
+    # Create the reverse complement of the target sequence
+    target_seq = Seq(target)
+    target_rev_comp = str(target_seq.reverse_complement())
+
+    # Construct the command using shlex to ensure safety
+    command = f"/extdata2/JG/Multiplexed_off_target/2022_11_18_Cancer_target/RIsearch1/RIsearch -Q {shlex.quote(gN19)} -T {shlex.quote(target_rev_comp)} -m su95 -f 5000 -w CRISPR_20nt_5p_3p"
+
+    try:
+        # Use subprocess.run for better handling of subprocess
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        
+        # Process the output
+        list_data = result.stdout.strip().split('\n')
+
+        # Extract Free Energy and aligned patterns
+        Free_Energy = list_data[4].split()
+        delta_GH = float(Free_Energy[6])
+
+        aligned_pattern = list_data[3].split('\t')
+        gN19_aligned = aligned_pattern[0].replace('B', 'R')
+        target_aligned = aligned_pattern[1].replace('B', 'D')
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {e}")
+        return None, None, None  # Or handle this case as needed
+
+    return delta_GH, gN19_aligned, target_aligned
+
+def process_bulge_type(df, n, m, bulge_type):
+    """Process different bulge types and return updated DataFrame."""
+    
+    df_copy = df.copy()
+    delta_GH_data = {}
+    alignment_data = {}
+    
+    for idx in df_copy.index:
+        sgRNA = df_copy.loc[idx, 'sgRNA'].upper()
+        target = df_copy.loc[idx, 'Target'][n:m].upper()
+        
+        delta_GH, gRNA_aligned, target_aligned = delta_GH_CRISPR(sgRNA, target)
+        delta_GH_data[idx] = delta_GH
+        alignment_data[idx] = (gRNA_aligned, target_aligned)
+        
+        if bulge_type == 'NB':
+            GN19 = 'G' + sgRNA
+            hamming_dist = HammingDistance(target, GN19) - 1
+            edit_dist = EditDistance(target, GN19) - 1
+            df_copy.loc[idx, 'N19_HammingDist'] = hamming_dist
+            df_copy.loc[idx, 'N19_EditDist'] = edit_dist
+    
+    # Add delta_GH and alignment data
+    delta_col = f'{bulge_type}_delta_GH'
+    df_copy[delta_col] = pd.Series(delta_GH_data)
+    
+    aligned_data = pd.DataFrame.from_dict(alignment_data, orient='index', columns=[f'{bulge_type}_GN19_aligned', f'{bulge_type}_target_aligned'])
+    df_copy = df_copy.join(aligned_data)
+    
+    return df_copy
+
+def def_main_CRISPR(input_df, n, m, Bulge_Type):
+    """Main function to process the CRISPR data based on bulge type."""
+    
+    if Bulge_Type not in ['NB', 'DB', 'RB']:
+        raise ValueError(f"Unsupported Bulge_Type: {Bulge_Type}")
+    
+    return process_bulge_type(input_df, n, m, Bulge_Type)
+
+
+def def_concurrent(list_df, max_workers_num, n, m, Bulge_Type):
+    
+    list_future = []
+    list_result_df = []
+    
+    with ProcessPoolExecutor(max_workers=max_workers_num) as executor:
+        for df in list_df:
+            future = executor.submit(def_main_CRISPR, df, n, m, Bulge_Type)
+            list_future.append(future)
+            
+    for future in list_future:
+        result = future.result()
+        if not result.empty:
+            list_result_df.append(result)
+            
+    return list_result_df
+
+def update_alignment_data(df, idx, deltaGH_min, alignment_dict, binding_type):
+    """Helper function to update DataFrame with modified alignment data."""
+    df.loc[idx, 'opti_deltaGH'] = deltaGH_min
+    df.loc[idx, 'Binding_Type_predicted'] = binding_type
+    df.loc[idx, 'opti_target'] = alignment_dict['target_modified']
+    df.loc[idx, 'opti_GN19'] = alignment_dict['gRNA_modified']
+    df.loc[idx, 'opti_target_aligned'] = alignment_dict['target_aligned_modified']
+    df.loc[idx, 'opti_GN19_aligned'] = alignment_dict['gRNA_aligned_modified']
+
+def process_deltaGH_min(df, idx, deltaGH_min_idx, dicts, min_values):
+    """Helper function to handle deltaGH_min and update DataFrame."""
+    if deltaGH_min_idx == 0:
+        update_alignment_data(df, idx, min_values[0], dicts['NB'], 'NB')
+    elif deltaGH_min_idx == 1:
+        update_alignment_data(df, idx, min_values[1], dicts['DB'], 'DB')
+    elif deltaGH_min_idx == 2:
+        update_alignment_data(df, idx, min_values[2], dicts['RB'], 'RB')
+
+def opti_deltaGH(input_final_df, run_id):
+    def modify_and_update(df_row):
+        # Extract necessary values
+        sgRNA = df_row['sgRNA'].upper()
+        Target = df_row['Target'].upper()
+        NB_delta_GH = df_row['NB_delta_GH']
+        DB_delta_GH = df_row['DB_delta_GH']
+        RB_delta_GH = df_row['RB_delta_GH']
+
+        list_deltaGH = [NB_delta_GH, DB_delta_GH, RB_delta_GH]
+        deltaGH_min = min(list_deltaGH)
+        deltaGH_min_idx = list_deltaGH.index(deltaGH_min)
+        
+        # Alignment and sequences preparation
+        GN19 = 'G' + sgRNA
+        NB_target = Target[4:24]
+        DB_target = Target[3:24]
+        RB_target = Target[5:24]
+
+        # Call modify_aligned_pattern (assumed external function)
+        dict_NB_modified_alignment = modify_aligned_pattern(NB_target, GN19, df_row['NB_target_aligned'], df_row['NB_GN19_aligned'])
+        dict_DB_modified_alignment = modify_aligned_pattern(DB_target, GN19, df_row['DB_target_aligned'], df_row['DB_GN19_aligned'])
+        dict_RB_modified_alignment = modify_aligned_pattern(RB_target, GN19, df_row['RB_target_aligned'], df_row['RB_GN19_aligned'])
+
+        # Modified scores
+        list_aligned_score = [
+            dict_NB_modified_alignment['aligned_modified_score'],
+            dict_DB_modified_alignment['aligned_modified_score'],
+            dict_RB_modified_alignment['aligned_modified_score']
+        ]
+
+        # Update Binding Type Prediction logic based on deltaGH and conditions
+        if deltaGH_min >= 0:
+            df_row['Binding_Type_predicted'] = 'NS'  # Non-Spontaneous
+            df_row['opti_deltaGH'] = deltaGH_min
+            dict_alignment = dict_NB_modified_alignment  # Default to NB
+
+        elif deltaGH_min_idx == 0:  # NB is the minimum
+            df_row['Binding_Type_predicted'] = 'NB'
+            df_row['opti_deltaGH'] = NB_delta_GH
+            dict_alignment = dict_NB_modified_alignment
+
+        elif deltaGH_min_idx == 1:  # DB is the minimum
+            df_row['Binding_Type_predicted'] = 'DB'
+            df_row['opti_deltaGH'] = DB_delta_GH
+            dict_alignment = dict_DB_modified_alignment
+
+            # Further checks as in the original logic
+            if 'D' not in df_row['DB_target_aligned']:
+                list_deltaGH = [NB_delta_GH, RB_delta_GH]
+                deltaGH_min = min(list_deltaGH)
+                deltaGH_min_idx = list_deltaGH.index(deltaGH_min)
+                df_row['opti_deltaGH'] = deltaGH_min
+
+                if deltaGH_min_idx == 0:
+                    df_row['Binding_Type_predicted'] = 'NB'
+                    dict_alignment = dict_NB_modified_alignment
+                else:
+                    df_row['Binding_Type_predicted'] = 'RB'
+                    dict_alignment = dict_RB_modified_alignment
+
+        elif deltaGH_min_idx == 2:  # RB is the minimum
+            df_row['Binding_Type_predicted'] = 'RB'
+            df_row['opti_deltaGH'] = RB_delta_GH
+            dict_alignment = dict_RB_modified_alignment
+
+            # Further checks as in the original logic
+            if 'R' not in df_row['RB_GN19_aligned'] or df_row['NB_GN19_aligned'][1:] == df_row['RB_GN19_aligned'][1:]:
+                list_deltaGH = [NB_delta_GH, DB_delta_GH]
+                deltaGH_min = min(list_deltaGH)
+                deltaGH_min_idx = list_deltaGH.index(deltaGH_min)
+                df_row['opti_deltaGH'] = deltaGH_min
+
+                if deltaGH_min_idx == 0:
+                    df_row['Binding_Type_predicted'] = 'NB'
+                    dict_alignment = dict_NB_modified_alignment
+                else:
+                    df_row['Binding_Type_predicted'] = 'DB'
+                    dict_alignment = dict_DB_modified_alignment
+
+        # Handle score conflicts (same deltaGH values)
+        if NB_delta_GH == DB_delta_GH or DB_delta_GH == RB_delta_GH or NB_delta_GH == RB_delta_GH:
+            list_deltaGH = [NB_delta_GH, DB_delta_GH, RB_delta_GH]
+            deltaGH_min = min(list_deltaGH)
+            deltaGH_min_idx = list_deltaGH.index(deltaGH_min)
+
+            if list_deltaGH.count(deltaGH_min) > 1:
+                # Handle score equality cases (use alignment score)
+                aligned_score_max = max(list_aligned_score)
+                aligned_score_max_idx = list_aligned_score.index(aligned_score_max)
+
+                if list_aligned_score.count(aligned_score_max) > 1:
+                    # Handling tie-breaking cases based on alignment score
+                    deltaGH_max_idx = list_deltaGH.index(max(list_deltaGH))
+
+                    if deltaGH_max_idx == 0:
+                        df_row['Binding_Type_predicted'] = 'DB~RB'
+                    elif deltaGH_max_idx == 1:
+                        df_row['Binding_Type_predicted'] = 'NB~RB'
+                    else:
+                        df_row['Binding_Type_predicted'] = 'NB~DB'
+                else:
+                    if aligned_score_max_idx == 0:
+                        df_row['Binding_Type_predicted'] = 'NB'
+                    elif aligned_score_max_idx == 1:
+                        df_row['Binding_Type_predicted'] = 'DB'
+                    else:
+                        df_row['Binding_Type_predicted'] = 'RB'
+
+        # Update the row with modified alignment results using a dictionary
+        df_row.update({
+            'opti_target'        : dict_alignment['target_modified'],
+            'opti_GN19'          : dict_alignment['gRNA_modified'],
+            'opti_target_aligned': dict_alignment['target_aligned_modified'],
+            'opti_GN19_aligned'  : dict_alignment['gRNA_aligned_modified']
+        })
+        
+        return df_row
+
+    # Apply the optimized function to each row using apply
+    input_final_df = input_final_df.apply(modify_and_update, axis=1)
+
+    # Handle exception cases
+    two_best_deltaGH_df = input_final_df[input_final_df['Binding_Type_predicted'].str.contains('~')]
+    if not two_best_deltaGH_df.empty:
+        two_best_deltaGH_df.to_csv(f'{run_id}_Binding_Type_Exception.txt', sep='\t', index=False)
+
+    return input_final_df
+
+
+
+
+conv_scaffold = 'GTTTTAGAGCTAGAAATAGCAAGTTAAAATAAGGCTAGTCCGTTATCAACTTGAAAAAGTGGCACCGAGTCGGTGC'
+opt_scaffold = 'GTTTCAGAGCTATGCTGGAAACAGCATAGCAAGTTGAAATAAGGCTAGTCCGTTATCAACTTGAAAAAGTGGCACCGAGTCGGTGC'
+tlock_scaffold = 'GTTTCAGAGCTATGCTGGAAACAGCATAGCAAGTTGAAATAAGGCTAGTCCGTTATCAACTTGGACTTCGGTCCAAGTGGCACCGAGTCGGTGC'
+U6_terminator_1 = 'T'
+U6_terminator_2 = 'TT'
+U6_terminator_3 = 'TTT'
+U6_terminator_4 = 'TTTT'
+U6_terminator_5 = 'TTTTT'
+U6_terminator_6 = 'TTTTTT'
+T7_downstream = 'TTTTTTG'
+
+def def_concurrent_MFE(list_input_each_df, max_workers_num, each_column):
+    
+    list_each_future = []
+    list_result_df = []
+    
+    with ProcessPoolExecutor(max_workers=max_workers_num) as executor:
+        for input_each_df in list_input_each_df:
+            each_future = executor.submit(calculate_mfe, input_each_df, each_column)
+            list_each_future.append(each_future)
+            
+    for each_future in list_each_future:
+        each_result = each_future.result()
+        list_result_df.append(each_result)
+            
+    return list_result_df
+
+
+def calculate_mfe(input_df, each_column):
+    # each_column = 'sgRNA'
+    
+    df_out = input_df.copy()
+
+    list_mfe_spacer = [fold_compound('G'+spacer).mfe()[1] for spacer in input_df[each_column]] # GN19 only
+    list_mfe_sgrna  = [fold_compound('G'+spacer+conv_scaffold).mfe()[1] for spacer in input_df[each_column]] # GN19 + scaffold
+    
+    df_out['MFE_GN19'] = list_mfe_spacer
+    df_out['MFE_GN19_scaffold'] = list_mfe_sgrna
+        
+    return df_out
