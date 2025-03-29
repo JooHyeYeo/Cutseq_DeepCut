@@ -1,21 +1,5 @@
 # Code for Cut-seq
 
-def read_fastq(file):
-  input_dic = {}
-  with open("{}".format(file), 'r') as f:
-      for i, line in enumerate(f):
-          if i%4 !=1: pass
-          else:
-              x = line.strip()
-              if x in input_dic.keys():
-                  input_dic[x] += 1
-              else:
-                  input_dic[x] = 1
-
-  return input_dic
-
-
-
 
 def mm_generator (Mismatch_num, FP):
 
